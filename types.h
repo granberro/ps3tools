@@ -6,11 +6,10 @@
 
 #include <stdint.h>
 
-typedef uint64_t u64;
-typedef uint32_t u32;
-typedef uint16_t u16;
-typedef uint8_t u8;
-
+typedef unsigned long long u64;
+typedef unsigned int u32;
+typedef unsigned short u16;
+typedef unsigned char u8;
 
 struct elf_phdr {
 	u32 p_type;
@@ -64,7 +63,6 @@ struct elf_hdr {
 	u16 e_shtrndx;
 };
 
-
 struct id2name_tbl {
 	u32 id;
 	const char *name;
@@ -79,16 +77,17 @@ struct key {
 	u8 pub[40];
 	u8 priv[21];
 	u32 ctype;
+	char *id;
 };
 
 struct keylist {
 	u32 n;
 	struct key *keys;
-    struct key *idps;
-    struct key *klic;
-    struct key *rif;
-    struct key *npdrm_const;
-    struct key *free_klicensee;
+    u8 idps[0x10];
+    u8 klic[0x10];
+    u8 rif[0x10];
+    u8 npdrm_const[0x10];
+    u8 free_klicensee[0x10];
 };
 
 struct rif {

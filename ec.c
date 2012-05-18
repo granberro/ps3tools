@@ -225,14 +225,17 @@ static void generate_ecdsa(u8 *R, u8 *S, u8 *k, u8 *hash)
 	u8 m[21];
 	u8 minv[21];
 	struct point mG;
+	FILE *fp;
 
 	e[0] = 0;
 	memcpy(e + 1, hash, 20);
 	bn_reduce(e, ec_N, 21);
 
 try_again:
-
-	get_rand(m, sizeof m);
+	fp = fopen("/dev/random", "rb");
+	if (fread(m, sizeof m, 1, fp) != 1)
+		fail("reading random");
+	fclose(fp);
 	m[0] = 0;
 	if (bn_compare(m, ec_N, 21) >= 0)
 		goto try_again;

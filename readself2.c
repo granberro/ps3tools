@@ -49,33 +49,17 @@ static u64 elf_ident2;
 
 static int decrypted = -1;
 
-struct id2name_tbl t_sdk_type[] = 
-{
-	{0, "Retail (Type 0)"},
-	{1, "Retail"},
-	{2, "Retail (Type 1)"},
-	{3, "Unknown SDK3"},
-	{4, "Retail >=3.40"},
-	{5, "Unknown SDK5"},
-	{6, "Unknown SDK6"},
-	{7, "Retail >=3.50"},
-	{8, "Unknown SDK8"},
-	{9, "Unknown SDK9"},
-	{10, "Retail >=3.55"},
-	{11, "Unknown SDK11"},
-	{12, "Unknown SDK12"},
-	{13, "Retail >=3.56"},
-	{14, "Unknown SDK14"},
-	{15, "Unknown SDK15"},
-	{16, "Retail >=3.60"},
-	{17, "Unknown SDK17"},
-	{18, "Unknown SDK18"},
-	{19, "Retail >=3.65"},
-	{20, "Unknown SDK20"},
-	{21, "Unknown SDK21"},
-	{22, "Retail >=3.70"},
-	{23, "Unknown SDK23"},
-	{24, "Unknown SDK24"},
+struct id2name_tbl t_sdk_type[] = {
+	{0x00, "0.92"},
+	{0x01, "3.15"},
+	{0x02, "Retail (Type 1)"},
+	{0x04, "3.40"},
+	{0x07, "3.50"},
+	{0x0A, "3.55"},
+	{0x0D, "3.56"},
+	{0x10, "3.60"},
+	{0x13, "3.65"},
+	{0x16, "3.67"},
 	{0x8000, "Devkit"},
 	{0, NULL}
 };
@@ -263,8 +247,8 @@ static void parse_self(void)
 	app_version = be64(self + info_offset + 0x10);
 	unknown3 =    be64(self + info_offset + 0x18);
 
-  elf_ident =   be64(self + elf_offset + 0x00);
-  elf_ident2 =  be64(self + elf_offset + 0x08);
+	elf_ident =   be64(self + elf_offset + 0x00);
+	elf_ident2 =  be64(self + elf_offset + 0x08);
 	elf = self + elf_offset;
 	arch64 = elf_read_hdr(elf, &ehdr);
 }
@@ -277,7 +261,7 @@ static void decrypt_header(void)
 	if (klist == NULL)
 		return;
 
-    sce_remove_npdrm(self, klist);
+    	sce_remove_npdrm(self, klist);
 	decrypted = sce_decrypt_header(self, klist);
 	free(klist->keys);
 	free(klist);
@@ -668,6 +652,7 @@ static void show_sinfo(void)
 	u64 offset, size;
 	u32 compressed, encrypted;
 	u32 unk1, unk2;
+	u64 next;
 
   printf("Section Info       file\n");
   printf("                  offset  data\n");
@@ -986,6 +971,22 @@ static void show_meta(void)
 		        (u16)((meta_offset + 0x80 + 0x30*i) + 0x08),
 		        (u32)(size >> 32), (u32)size
 		      );
+		printf("      Type:        %04x = %04x\n",
+		        (u16)((meta_offset + 0x80 + 0x30*i) + 0x10),
+		        be32(tmp + 0x10)
+		      );
+		printf("      IDX:         %04x = %04x\n",
+		        (u16)((meta_offset + 0x80 + 0x30*i) + 0x14),
+		        be32(tmp + 0x14)
+		      );
+		printf("      Encrypted:   %04x = %04x\n",
+		        (u16)((meta_offset + 0x80 + 0x30*i) + 0x20),
+		        be32(tmp + 0x20)
+		      );
+		printf("      Compressed:  %04x = %04x\n",
+		        (u16)((meta_offset + 0x80 + 0x30*i) + 0x2c),
+		        be32(tmp + 0x2c)
+		      );
 		printf("      Key:         %04x = %04x\n",
 		        (u16)((meta_offset + 0x80 + 0x30*i) + 0x24),
 		        be32(tmp + 0x24)
@@ -998,10 +999,6 @@ static void show_meta(void)
 		        (u16)((meta_offset + 0x80 + 0x30*i) + 0x1c),
 		        be32(tmp + 0x1c)
 		      );
-        printf("      Type:        %04x = %04x\n",
-                (u16)((meta_offset + 0x80 + 0x30*i) + 0x10),
-                be32(tmp + 0x10)
-              );
 	}
 	printf("\n");
 

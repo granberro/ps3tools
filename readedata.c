@@ -1,4 +1,6 @@
-// Copyright 2010       Sven Peter <svenpeter@gmail.com>
+// based on fail0verflow tools
+// based on JuanNadie stubs
+// Copyright 2010 Sven Peter <svenpeter@gmail.com>
 // Licensed under the terms of the GNU GPL, version 2
 // http://www.gnu.org/licenses/old-licenses/gpl-2.0.txt
 
@@ -15,6 +17,7 @@
 
 static u8 *self;
 static u8 *elf;
+static u8 *edata;
 
 static struct elf_hdr ehdr;
 
@@ -42,13 +45,11 @@ struct id2name_tbl t_sdk_type[] = {
 	{0x00, "0.92"},
 	{0x01, "3.15"},
 	{0x02, "Retail (Type 1)"},
-	{0x04, "3.40"},
+	{0x04, "3.41"},
 	{0x07, "3.50"},
 	{0x0A, "3.55"},
 	{0x0D, "3.56"},
 	{0x10, "3.60"},
-	{0x13, "3.65"},
-	{0x16, "3.67"},
 	{0x8000, "Devkit"},
 	{0, NULL}
 };
@@ -62,6 +63,12 @@ struct id2name_tbl t_app_type[] = {
 	{6, "secure loader"},
 	{8, "NP-DRM application"},
 	{0, NULL}
+};
+
+struct id2name_tbl t_edat_version[] = {
+	{0, "1"},
+	{2, "2"},
+	{3, "3"}
 };
 
 static struct id2name_tbl t_shdr_type[] = {
@@ -136,8 +143,8 @@ static void parse_self(void)
 	ctrl_offset = be64(self + 0x58);
 	ctrl_size =   be64(self + 0x60);
 
-	authid =      be64(self + info_offset + 0x00);	
-	vendorid =    be32(self + info_offset + 0x08);	
+	vendorid =    be32(self + info_offset + 0x08);
+	authid =      be64(self + info_offset + 0x00);
 	app_type =    be32(self + info_offset + 0x0c);
 	app_version = be64(self + info_offset + 0x10);
 
@@ -182,13 +189,30 @@ static struct keylist *self_load_keys(void)
 static void decrypt_header(void)
 {
 	struct keylist *klist;
+	u32 unk;
+	u64 unk2;
 
 	klist = self_load_keys();
 	if (klist == NULL)
 		return;
 
-    	sce_remove_npdrm(self, klist);
+	sce_remove_npdrm(self, klist);
 	decrypted = sce_decrypt_header(self, klist);
+	
+	
+	printf("SELF decrypted %d\n", decrypted);
+	
+	unk = be32(edata + 0x0c);
+	unk2= be64(edata + 0x10);
+	wbe32(edata + 0x0c, 0xe0);
+	wbe64(edata + 0x10, 0x100);
+	sce_decrypt_npdrm(edata, klist, klist->free_klicensee);
+	decrypted = sce_decrypt_header(edata, klist);
+	printf("EDAT decrypted %d\n", decrypted);
+
+	wbe32(edata + 0x0c, unk);
+	wbe64(edata + 0x10, unk2);
+
 	free(klist->keys);
 	free(klist);
 }
@@ -220,9 +244,45 @@ static void show_self_header(void)
 	printf("  app version:    %x.%x.%x\n", (u16)(app_version >> 48), (u16)(app_version >> 32), (u32)app_version);
 	printf("  SDK type:       %s\n", id2name(sdk_type, t_sdk_type, "unknown"));
 	printf("  app type:       %s\n", id2name(app_type, t_app_type, "unknown"));
-
-
 	printf("\n");
+
+	printf("  Key:           ");
+	print_hash(self + meta_offset + 0x20, 0x10);
+	printf("\n                 ");
+	print_hash(self + meta_offset + 0x30, 0x10);
+	printf("\n");
+
+	printf("  IV :           ");
+	print_hash(self + meta_offset + 0x40, 0x10);
+	printf("\n                 ");
+	print_hash(self + meta_offset + 0x50, 0x10);
+	printf("\n");
+}
+
+static void show_edata_header(void)
+{
+	char id[0x31];
+	memset(id, 0, 0x31);
+	memcpy(id, edata + 0x10, 0x30);
+
+	printf("  edata info:\n");
+	printf("    magic : %08x\n", be32(edata + 0x00));
+	printf("    file version : %s\n", id2name(be32(edata + 0x04), t_edat_version, "unknown"));
+	printf("    NPDRM type : %08x\n", be32(edata + 0x08));
+	printf("    Content type : %08x\n", be32(edata + 0x0c));
+	printf("    content_id: %s\n", id);
+	printf("    digest:    ");
+	print_hash(edata + 0x40, 0x10);
+	printf("\n    invdigest: ");
+	print_hash(edata + 0x50, 0x10);
+	printf("\n    xordigest: ");
+	print_hash(edata + 0x60, 0x10);
+	printf("\n");
+	printf("    key id : %08x\n", be16(edata + 0x80));
+	printf("    compresed : %s\n", id2name((be16(edata + 0x82) & 1) + 1, t_compressed, "unknown"));
+	printf("    format : %08x\n", be16(edata + 0x82) & 0xFE);
+	printf("    block: %08x - %d\n", be32(edata + 0x84), be32(edata + 0x84));
+	printf("    size : %08x - %lld\n", be64(edata + 0x88), be64(edata + 0x88));	
 }
 
 static void show_ctrl(void)
@@ -351,18 +411,6 @@ static void show_meta(void)
 	meta_len = be32(self + meta_offset + 0x60 + 0x4);
 	meta_n_hdr = be32(self + meta_offset + 0x60 + 0xc);
 	meta_n_keys = be32(self + meta_offset + 0x60 + 0x10);
-
-	printf("  Key:           ");
-	print_hash(self + meta_offset + 0x20, 0x10);
-	printf("\n                 ");
-	print_hash(self + meta_offset + 0x30, 0x10);
-	printf("\n");
-
-	printf("  IV :           ");
-	print_hash(self + meta_offset + 0x40, 0x10);
-	printf("\n                 ");
-	print_hash(self + meta_offset + 0x50, 0x10);
-	printf("\n");
 
 	printf("  Signature end   %08x\n", meta_len);
 	printf("  Sections        %d\n", meta_n_hdr);
@@ -572,21 +620,23 @@ static void show_shdrs(void)
 
 int main(int argc, char *argv[])
 {
-	if (argc != 2)
-		fail("usage: readself file.self");
+	if (argc != 3)
+		fail("usage: readedata file.edata file.self");
 
-	self = mmap_file(argv[1]);
+	edata = mmap_file(argv[1]);
+	self = mmap_file(argv[2]);
 
 	parse_self();
 	decrypt_header();
 
 	show_self_header();
-	show_ctrl();
+	show_edata_header();
+/*	show_ctrl();
 	show_sinfo();
-	show_meta();
+	
 	show_elf_header();
 	show_phdrs();
 	show_shdrs();
-
+*/
 	return 0;
 }

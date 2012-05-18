@@ -1,6 +1,7 @@
 // Copyright 2010       Sven Peter <svenpeter@gmail.com>
 // Licensed under the terms of the GNU GPL, version 2
 // http://www.gnu.org/licenses/old-licenses/gpl-2.0.txt
+// Hacer unpkg del PUP y luego cosunpkg del fichero content extraido
 
 #include "tools.h"
 #include "types.h"
@@ -11,12 +12,6 @@
 #include <stdlib.h>
 #include <unistd.h>
 #include <sys/stat.h>
-
-#ifdef WIN32
-#define MKDIR(x,y) mkdir(x)
-#else
-#define MKDIR(x,y) mkdir(x,y)
-#endif
 
 u8 *pkg = NULL;
 static u64 dec_size;
@@ -114,7 +109,7 @@ int main(int argc, char *argv[])
 	if (argc == 3) {
 		pkg = mmap_file(argv[1]);
 
-		MKDIR(argv[2], 0777);
+		mkdir(argv[2], 0777);
 
 		if (chdir(argv[2]) != 0)
 			fail("chdir");
@@ -130,7 +125,7 @@ int main(int argc, char *argv[])
 		decrypt_pkg();
 		unpack_content(argv[3]);
 	} else {
-		fail("usage: unpkg [-s] filename.pkg target");
+		fail("usage: unpkg [-s] filename.pkg target\nFor PUPs cosunpkg the content file");
 	}
 
 

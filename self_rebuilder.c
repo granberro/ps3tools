@@ -55,7 +55,7 @@ enum {
 static u8 *elf = NULL ;
 static u8 *self = NULL ;
 
-static u32 type ;
+static u32 app_type ;
 static int packed_type ;
 
 struct elf_hdr ehdr ;
@@ -72,9 +72,9 @@ static u64 phdr_offset ;
 static u64 shdr_offset ;
 static u64 sec_offset ;
 static u64 ctrl_offset ;
-static u64 version ;
+static u64 app_version ;
 static u64 auth_id ;
-static u64 vendor_id ;
+static u32 vendor_id ;
 static u16 sdk_type ;
 static char versionsuffix[4] ;
 
@@ -95,19 +95,17 @@ static const char *elf_name = NULL ;
 static const char *self_name = NULL ;
 
 struct id2name_tbl t_sdk_type[] = {
-  {0, "Retail (Type 0)"},
-  {1, "Retail"},
-  {2, "Retail (Type 1)"},
-  {3, "Unknown SDK3"},
-  {4, "Unknown > = 3.42"},
-  {5, "Unknown SDK5"},
-  {6, "Unknown SDK6"},
-  {7, "Unknown > = 3.50"},
-  {8, "Unknown SDK8"},
-  {9, "Unknown SDK9"},
-  {0x8000, "Devkit"},
-  {0, NULL}
-} ;
+	{0x00, "0.92"},
+	{0x01, "3.15"},
+	{0x02, "Retail (Type 1)"},
+	{0x04, "3.41"},
+	{0x07, "3.50"},
+	{0x0A, "3.55"},
+	{0x0D, "3.56"},
+	{0x10, "3.60"},
+	{0x8000, "Devkit"},
+	{0, NULL}
+};
 
 struct id2name_tbl t_app_type[] = {
   {1, "level 0"},
@@ -144,81 +142,75 @@ get_keys (const char *suffix)
   ecdsa_set_priv (ks.priv) ;
 }
 
-static void
-parse_elf (void)
+// Elf produced by unself do not have compressed sections
+static void parse_elf (void)
 {
-  u32 i ;
+	u32 i ;
 
-  arch64 = elf_read_hdr (elf, &ehdr) ;
+	arch64 = elf_read_hdr (elf, &ehdr) ;
 
-  for (i = 0; i < ehdr.e_phnum; i++) {
-    elf_read_phdr (arch64, elf + ehdr.e_phoff + i * ehdr.e_phentsize, &phdr[i]) ;
-  }
+	for (i = 0; i < ehdr.e_phnum; i++) {
+		elf_read_phdr (arch64, elf + ehdr.e_phoff + i * ehdr.e_phentsize, &phdr[i]) ;
+	}
 }
 
-static void
-parse_self (void)
+static void parse_self (void)
 {
-  //here we are taking every self information needed and more
-  sdk_type = be16 (self + 0x08) ;
-  meta_offset = be32 (self + 0x0c) ;
-  header_len = be64 (self + 0x10) ;
-  filesize = be64 (self + 0x18) ;
-  info_offset = be64 (self + 0x28) ;
-  elf_offset = be64 (self + 0x30) ;
-  phdr_offset = be64 (self + 0x38) - elf_offset ;
-  shdr_offset = be64 (self + 0x40) - elf_offset ;
-  sec_offset = be64 (self + 0x48) ;
-  ver_info = be64 (self + 0x50) ;
-  ctrl_offset = be64 (self + 0x58) ;
-  ctrl_size = be64 (self + 0x60) ;
+	sdk_type = 	be16 (self + 0x08) ;
+	meta_offset = 	be32 (self + 0x0c) ;
+	header_len = 	be64 (self + 0x10) ;
+	filesize = 	be64 (self + 0x18) ;
+	info_offset =	be64 (self + 0x28) ;
+	elf_offset =	be64 (self + 0x30) ;
+	phdr_offset =	be64 (self + 0x38) - elf_offset ;
+	shdr_offset =	be64 (self + 0x40) - elf_offset ;
+	sec_offset =	be64 (self + 0x48) ;
+	ver_info =	be64 (self + 0x50) ;
+	ctrl_offset =	be64 (self + 0x58) ;
+	ctrl_size =	be64 (self + 0x60) ;
 
-  vendor_id = be32 (self + info_offset + 0x08) ;
-  auth_id = be64 (self + info_offset + 0x00) ;
-  type = be32 (self + info_offset + 0x0c) ;
-  packed_type = (type - 1) ;
-  version = be64 (self + info_offset + 0x10) ;
+	vendor_id =	be32 (self + info_offset + 0x08) ;
+	auth_id =	be64 (self + info_offset + 0x00) ;
+	app_type =	be32 (self + info_offset + 0x0c) ;
+	packed_type = 	(app_type - 1) ;
+	app_version = 	be64 (self + info_offset + 0x10) ;
 
-  elf = self + elf_offset ;
-  arch64 = elf_read_hdr (elf, &ehdr) ;
+	elf = self + elf_offset ;
+	arch64 = elf_read_hdr (elf, &ehdr) ;
 }
 
-static int
-qsort_compare (const void *a, const void *b)
+static int qsort_compare (const void *a, const void *b)
 {
-  const struct self_sec *sa, *sb ;
+	const struct self_sec *sa, *sb ;
+	sa = a ;
+	sb = b ;
 
-  sa = a ;
-  sb = b ;
-
-  if (sa->offset > sb->offset) {
-    return 1 ;
-  } else if (sa->offset < sb->offset) {
-    return -1 ;
-  } else {
-    return 0 ;
-  }
+	if (sa->offset > sb->offset) {
+		return 1 ;
+	} else if (sa->offset < sb->offset) {
+		return -1 ;
+	} else {
+		return 0 ;
+	}
 }
 
-static void
-read_section (u32 i, struct self_sec *sec)
+static void read_section (u32 i, struct self_sec *sec)
 {
-  u8 *ptr ;
+	u8 *ptr ;
 
-  ptr = self + sec_offset + i * 0x20 ;
+	ptr = self + sec_offset + i * 0x20 ;
 
-  sec->idx = i ;
-  sec->offset = be64 (ptr + 0x00) ;
-  sec->size = be64 (ptr + 0x08) ;
-  sec->compressed = be32 (ptr + 0x10) ==  2 ? 1 : 0 ;
-  sec->encrypted = be32 (ptr + 0x1c) ;
-  sec->next = be64 (ptr + 0x20) ;
+	sec->idx = i ;
+	sec->offset = be64 (ptr + 0x00) ;
+	sec->size = be64 (ptr + 0x08) ;
+	sec->compressed = be32 (ptr + 0x10) ==  2 ? 1 : 0 ;
+	sec->encrypted = be32 (ptr + 0x1c) ;
+	sec->next = be64 (ptr + 0x20) ;
 }
 
 
 // Change compressed section size
-static void
-change_section_size (u32 i, u64 size)
+static void change_section_size (u32 i, u64 size)
 {
   u8 *ptr ;
 
@@ -249,75 +241,66 @@ change_section_offset (u32 i, int delta)
 }
 */
 
-// read every original section to know the number and the position
-static void
-read_sections (void)
+static void read_sections(void)
 {
-  struct self_sec s[MAX_PHDR] ;
-  struct elf_phdr p ;
-  u32 i ;
-  u32 j ;
-  u32 n_secs ;
-  u32 self_offset, elf_offset ;
+	struct self_sec s[MAX_PHDR];
+	struct elf_phdr p;
+	u32 i;
+	u32 j;
+	u32 n_secs;
+	u32 self_offset, elf_offset;
 
-  memset (s, 0, sizeof s) ;
-  for (i = 0, j = 0; i < ehdr.e_phnum; i++) {
-    read_section (i, &s[j]) ;
-    if (s[j].compressed) {
-      j++ ;
-    }
-  }
+	memset(s, 0, sizeof s);
+	for (i = 0, j = 0; i < ehdr.e_phnum; i++) {
+		read_section(i, &s[j]);
+		if (s[j].compressed)
+			j++;
+	}
 
-  n_secs = j ;
-  qsort (s, n_secs, sizeof (*s), qsort_compare) ;
+	n_secs = j;
+	qsort(s, n_secs, sizeof(*s), qsort_compare);
 
-  elf_offset = 0 ;
-  self_offset = header_len ;
-  j = 0 ;
-  i = 0 ;
-  while (elf_offset < filesize) {
-    if (i ==  n_secs) {
-      self_sections[j].offset = self_offset ;
-      self_sections[j].size = filesize - elf_offset ;
-      self_sections[j].compressed = 0 ;
-      self_sections[j].size_uncompressed = filesize - elf_offset ;
-      self_sections[j].elf_offset = elf_offset ;
-      elf_offset = filesize ;
-    } else if (self_offset ==  s[i].offset) {
-      self_sections[j].offset = self_offset ;
-      self_sections[j].size = s[i].size ;
-      compressed_sections[i].size = self_sections[j].size ;
-      compressed_sections[i].address = self_sections[j].offset ;
-      self_sections[j].compressed = 1 ;
-      elf_read_phdr (arch64, elf + phdr_offset + (ehdr.e_phentsize * s[i].idx), &p) ;
-      self_sections[j].size_uncompressed = p.p_filesz ;
-      self_sections[j].elf_offset = p.p_off ;
-      elf_offset = p.p_off + p.p_filesz ;
-      self_offset = s[i].next ;
-      compressed_sections[i].number = j ;
-      compressed_sections[i].compressed = 1 ;
-#ifdef DEBUG
-      printf ("section number compressed %d size 0x%x\n",
-          compressed_sections[0].count, compressed_sections[i].size) ;
-#endif
-      i++ ;
-      compressed_sections[0].count = i ;
-    } else {
-      elf_read_phdr (arch64, elf + phdr_offset + (ehdr.e_phentsize * s[i].idx), &p) ;
-      self_sections[j].offset = self_offset ;
-      self_sections[j].size = p.p_off - elf_offset ;
-      self_sections[j].compressed = 0 ;
-      self_sections[j].size_uncompressed = self_sections[j].size ;
-      self_sections[j].elf_offset = elf_offset ;
+	elf_offset = 0;
+	self_offset = header_len;
+	j = 0;
+	i = 0;
+	while (elf_offset < filesize) {
+		if (i == n_secs) {
+			self_sections[j].offset = self_offset;
+			self_sections[j].size = filesize - elf_offset;
+			self_sections[j].compressed = 0;
+			self_sections[j].size_uncompressed = filesize - elf_offset;
+			self_sections[j].elf_offset = elf_offset;
+			elf_offset = filesize;
+		} else if (self_offset == s[i].offset) {
+			self_sections[j].offset = self_offset;
+			self_sections[j].size = s[i].size;
+			self_sections[j].compressed = 1;
+			elf_read_phdr(arch64, elf + phdr_offset +
+					(ehdr.e_phentsize * s[i].idx), &p);
+			self_sections[j].size_uncompressed = p.p_filesz;
+			self_sections[j].elf_offset = p.p_off;
 
-      elf_offset +=  self_sections[j].size ;
-      self_offset +=  s[i].offset - self_offset ;
-    }
-    j++ ;
-  }
-  n_sections = j ;
+			elf_offset = p.p_off + p.p_filesz;
+			self_offset = s[i].next;
+			i++;
+		} else {
+			elf_read_phdr(arch64, elf + phdr_offset +
+					(ehdr.e_phentsize * s[i].idx), &p);
+			self_sections[j].offset = self_offset;
+			self_sections[j].size = p.p_off - elf_offset;
+			self_sections[j].compressed = 0;
+			self_sections[j].size_uncompressed = self_sections[j].size;
+			self_sections[j].elf_offset = elf_offset;
+
+			elf_offset += self_sections[j].size;
+			self_offset += s[i].offset - self_offset;
+		}
+		j++;
+	}
+
+	n_sections = j;
 }
-
 
 static void
 write_sections (void)
@@ -400,84 +383,78 @@ sign_header (void)
   ecdsa_sign (hash, r, s) ;
 }
 
-static u64
-get_filesize (const char *path)
+static struct keylist *self_load_keys(void)
 {
-  struct stat st ;
+	enum sce_key id;
 
-  stat (path, &st) ;
+	switch (app_type) {
+		case 1:
+			id = KEY_LV0;
+			break;
+	 	case 2:
+			id = KEY_LV1;
+			break;
+		case 3:
+			id = KEY_LV2;
+			break;
+		case 4:	
+			id = KEY_APP;
+			break;
+		case 5:
+			id = KEY_ISO;
+			break;
+		case 6:
+			id = KEY_LDR;
+			break;
+		case 8:
+            		id = KEY_NPDRM;
+			break;
+		default:
+			fail("invalid type: %08x", app_type);	
+	}
 
-  return st.st_size ;
+	return keys_get(id);
 }
 
-static struct keylist *
-self_load_keys (void)
+static void decrypt_header (void)
 {
-  enum sce_key id ;
+	struct keylist *klist ;
 
-  switch (type) {
-    case 1:
-      id = KEY_LV0 ;
-      break ;
-    case 2:
-      id = KEY_LV1 ;
-      break ;
-    case 3:
-      id = KEY_LV2 ;
-      break ;
-    case 4:
-      id = KEY_APP ;
-      break ;
-    case 5:
-      id = KEY_ISO ;
-      break ;
-    case 6:
-      id = KEY_LDR ;
-      break ;
-    default:
-      fail ("invalid type: %08x", type) ;
-      return NULL ;
-      break ;
-  }
-  return keys_get (id) ;
+	klist = self_load_keys () ;
+	if (klist ==  NULL)
+	return ;
+
+	sce_remove_npdrm(self, klist);
+	decrypted = sce_decrypt_header (self, klist) ;
+
+	free (klist->keys) ;
+	free (klist) ;
 }
 
-static void
-decrypt_header (void)
+static void show_self_header(void)
 {
-  struct keylist *klist ;
+	printf("SELF header\n");
+	printf("  elf #1 offset:  %08x_%08x\n", (u32)(elf_offset>>32), (u32)elf_offset);
+	printf("  header len:     %08x_%08x\n", (u32)(header_len>>32), (u32)header_len);
+	printf("  meta offset:    %08x_%08x\n", 0, meta_offset);
+	printf("  phdr offset:    %08x_%08x\n", (u32)(phdr_offset>>32), (u32)phdr_offset);
+	printf("  shdr offset:    %08x_%08x\n", (u32)(shdr_offset>>32), (u32)shdr_offset);
+	printf("  file size:      %08x_%08x\n", (u32)(filesize>>32), (u32)filesize);
+	printf("  auth id:        %08x_%08x (%s)\n", (u32)(auth_id>>32), (u32)auth_id, "unknown");
+	printf("  vendor id:      %08x\n", vendor_id);
+	printf("  info offset:    %08x_%08x\n", (u32)(info_offset >> 32), (u32)info_offset);
+	printf("  sinfo offset:   %08x_%08x\n", (u32)(sec_offset >> 32), (u32)sec_offset);	
+	printf("  version offset: %08x_%08x\n", (u32)(ver_info >> 32), (u32)ver_info);
+	printf("  control info:   %08x_%08x (%08x_%08x bytes)\n",
+	         (u32)(ctrl_offset >> 32), (u32)ctrl_offset,
+	         (u32)(ctrl_size >> 32), (u32)ctrl_size);
 
-  klist = self_load_keys () ;
-  if (klist ==  NULL)
-    return ;
+	printf("  app version:    %x.%x.%x\n", (u16)(app_version >> 48), (u16)(app_version >> 32), (u32)app_version);
+	printf("  SDK type:       %s\n", id2name(sdk_type, t_sdk_type, "unknown"));
+	printf("  app type:       %s\n", id2name(app_type, t_app_type, "unknown"));
 
-  decrypted = sce_decrypt_header (self, klist) ;
 
-  free (klist->keys) ;
-  free (klist) ;
-}
-
-static void
-show_self_header (void)
-{
-  printf ("SELF header information\n") ;
-  printf ("  auth id:        %08x%08x \n", (u32) (auth_id >> 32),
-      (u32) auth_id) ;
-  printf ("  vendor id:      %08x%08x\n", (u32) (vendor_id >> 32),
-      (u32) vendor_id) ;
-  printf ("  app version:    %x.%x.%x\n", (u16) (version >> 48),
-      (u16) (version >> 32), (u32) version) ;
-
-  /* take version suffix */
-  sprintf (versionsuffix, "%x%02x", (u16) (version >> 48), (u16) (version >> 32)) ;
-  printf ("  version suffix: %s ", versionsuffix) ;
-  printf ("\n") ;
-
-  printf ("  SDK type:       %s\n", id2name (sdk_type, t_sdk_type, "unknown")) ;
-#ifdef DEBUG
-  printf ("  type:           %d\n  sdk_type:       %d\n", type, sdk_type) ;
-#endif
-  printf ("  app type:       %s\n", id2name (type, t_app_type, "unknown")) ;
+	printf("\n");
 }
 
 static void
@@ -592,102 +569,102 @@ verify_hashes (void)
   printf ("\n") ;
 }
 
-static void
-decrypt (void)
+static void decrypt (void)
 {
-  int keyid ;
-  struct keylist *klist ;
+	int keyid ;
+	struct keylist *klist ;
 
-  klist = self_load_keys () ;
-  if (klist ==  NULL)
-    return ;
+	klist = self_load_keys () ;
+	if (klist ==  NULL)
+	return ;
 
-  keyid = sce_decrypt_header (self, klist) ;
+	keyid = sce_decrypt_header (self, klist) ;
 
-  if (keyid < 0) {
-    fail ("sce_decrypt_header failed") ;
-  }
+	if (keyid < 0) {
+		fail ("sce_decrypt_header failed") ;
+	}
 
-  if (sce_decrypt_data (self) < 0) {
-    fail ("sce_decrypt_data failed") ;
-  }
+	if (sce_decrypt_data (self) < 0) {
+		fail ("sce_decrypt_data failed") ;
+	}
 
-  if (klist->keys[keyid].pub_avail < 0) {
-    fail ("no public key available") ;
-  }
+	if (klist->keys[keyid].pub_avail < 0) {
+		fail ("no public key available") ;
+	}
 
-  if (ecdsa_set_curve (klist->keys[keyid].ctype) < 0) {
-    fail ("ecdsa_set_curve failed") ;
-  }
+	if (ecdsa_set_curve (klist->keys[keyid].ctype) < 0) {
+		fail ("ecdsa_set_curve failed") ;
+	}
 
-  ecdsa_set_pub (klist->keys[keyid].pub) ;
+	ecdsa_set_pub (klist->keys[keyid].pub) ;
 }
 
-int
-main (int argc, char *argv[])
+int main (int argc, char *argv[])
 {
-  FILE *fp ;
+	FILE *fp ;
 
-  printf ("SELF Rebuilder by Anonymous developers on EFNET\n") ;
-  printf ("  SELF and SPRX packer and signer \n") ;
-  printf ("  Based on the fail0verflow Tools \n") ;
-  printf ("  ! use with caution ! \n") ;
+	printf ("SELF Rebuilder by Anonymous developers on EFNET\n") ;
+	printf ("  SELF and SPRX packer and signer \n") ;
+	printf ("  Based on the fail0verflow Tools \n") ;
+	printf ("  ! use with caution ! \n") ;
 
-  printf ("\n") ;
-  if (argc !=  4) {
-    printf ("Usage: %s <input.elf> <output.self> <original.self>\n", argv[0]) ;
-    printf ("\tinput.elf: The input ELF to sign \n"
-	"\toutput.self: The output SELF/SPRX to generate\n"
-	"\toriginal.self: The reference original SELF/SPRX\n") ;
-    return -1 ;
-  }
-  self_size = get_filesize (argv[3]) ;
-  self = mmap_file (argv[3]) ;
+	printf ("\n") ;
+	if (argc !=  4) {
+		printf ("Usage: %s <input.elf> <output.self> <original.self>\n", argv[0]) ;
+		printf ("\tinput.elf: The input ELF to sign \n"
+			"\toutput.self: The output SELF/SPRX to generate\n"
+			"\toriginal.self: The reference original SELF/SPRX\n") ;
+		return -1 ;
+	}
 
-  parse_self () ;
-  decrypt_header () ;
+	self_size = get_filesize (argv[3]) ;
+	self = mmap_file (argv[3]) ;
 
-  show_self_header () ;
+	parse_self() ;
+	decrypt_header () ;
 
-  read_sections () ;
+	show_self_header () ;
 
-  get_keys (versionsuffix) ;
+	read_sections () ;
 
-  elf_name = argv[1] ;
-  self_name = argv[2] ;
+	get_keys (versionsuffix) ;
 
-  printf ("\nStarting to build self or sprx now...\n") ;
+	elf_name = argv[1] ;
+	self_name = argv[2] ;
 
-  elf_size = get_filesize (elf_name) ;
-  elf = mmap_file (elf_name) ;
+	printf ("\nStarting to build self or sprx now...\n") ;
 
-  parse_elf () ;
+	elf_size = get_filesize (elf_name) ;
+	elf = mmap_file (elf_name) ;
 
-  write_sections () ;
+	parse_elf () ;
 
-  calculate_hashes () ;
-  sign_header () ;
-  sce_decrypt_data (self) ;
-  sce_encrypt_header (self, &ks) ;
-  fp = fopen (self_name, "wb") ;
-  if (fp ==  NULL) {
-    fail ("fopen (%s) failed", self_name) ;
-  }
+	write_sections () ;
 
-  if (fwrite (self, self_size, 1, fp) !=  1) {
-    fail ("unable to write self") ;
-  }
+	calculate_hashes () ;
+	sign_header () ;
+	sce_decrypt_data (self) ;
+	sce_encrypt_header (self, &ks) ;
+	fp = fopen (self_name, "wb") ;
 
-  fclose (fp) ;
+	if (fp ==  NULL) {
+		fail ("fopen (%s) failed", self_name) ;
+	}
 
-  self = mmap_file (self_name) ;
+	if (fwrite (self, self_size, 1, fp) !=  1) {
+		fail ("unable to write self") ;
+	}
 
-  parse_self () ;
-  decrypt () ;
-  verify_signature () ;
-  verify_hashes () ;
+	fclose (fp) ;
 
-  printf ("  Finished\n") ;
+	self = mmap_file (self_name) ;
 
-  return 0 ;
+	parse_self() ;
+	decrypt () ;
+	verify_signature () ;
+	verify_hashes () ;
+
+	printf ("  Finished\n") ;
+
+	return 0 ;
 }

@@ -16,8 +16,7 @@ static int decrypt_metadata(uint8_t *metadata, uint32_t metadata_size,
 static int remove_npdrm(SELF *self, CONTROL_INFO *control_info, uint8_t *metadata,
     struct keylist *klist);
 static void decrypt_npdrm(uint8_t *metadata, struct keylist *klist,
-    struct key *klicensee);
-
+    u8 *klicensee);
 
 
 
@@ -26,6 +25,15 @@ self_read_headers(FILE *in, SELF *self, APP_INFO *app_info, ELF *elf,
     ELF_PHDR **phdr, ELF_SHDR **shdr, SECTION_INFO **section_info,
     SCEVERSION_INFO *sceversion_info, CONTROL_INFO **control_info)
 {
+  uint16_t phnum;
+  uint16_t i;
+  uint16_t shnum;
+  ELF_SHDR *elf_shdr;
+  SECTION_INFO *sections;
+  uint32_t offset;
+  uint32_t index;
+  CONTROL_INFO *info;
+  info = NULL;
 
   // SELF
   if (fread (self, sizeof(SELF), 1, in) != 1) {
@@ -87,8 +95,7 @@ self_read_headers(FILE *in, SELF *self, APP_INFO *app_info, ELF *elf,
 
   // PHDR and SECTION INFO
   if (phdr || section_info) {
-    uint16_t phnum = 0;
-    uint16_t i;
+    phnum = 0;
 
     if (elf) {
       phnum = elf->phnum;
@@ -123,8 +130,6 @@ self_read_headers(FILE *in, SELF *self, APP_INFO *app_info, ELF *elf,
 
     // SECTION INFO
     if (section_info) {
-      SECTION_INFO *sections = NULL;
-
       sections = malloc (sizeof(SECTION_INFO) * phnum);
 
       fseek (in, self->section_info_offset, SEEK_SET);
@@ -153,9 +158,8 @@ self_read_headers(FILE *in, SELF *self, APP_INFO *app_info, ELF *elf,
 
   // CONTROL INFO
   if (control_info) {
-    uint32_t offset = 0;
-    uint32_t index = 0;
-    CONTROL_INFO *info = NULL;
+	offset = 0;
+	index = 0;
 
     while (offset < self->controlinfo_size) {
 
@@ -185,9 +189,7 @@ self_read_headers(FILE *in, SELF *self, APP_INFO *app_info, ELF *elf,
 
   // SHDR
   if (shdr) {
-    uint16_t shnum = 0;
-    uint16_t i;
-    ELF_SHDR *elf_shdr = NULL;
+    shnum = 0;
 
     if (elf) {
       shnum = elf->shnum;
@@ -220,7 +222,6 @@ self_read_headers(FILE *in, SELF *self, APP_INFO *app_info, ELF *elf,
       *shdr = elf_shdr;
     }
   }
-
 }
 
 
@@ -230,10 +231,12 @@ self_read_metadata (FILE *in, SELF *self, APP_INFO *app_info,
     METADATA_SECTION_HEADER **section_headers, uint8_t **keys,
     SIGNATURE_INFO *signature_info, SIGNATURE *signature, CONTROL_INFO *control_info)
 {
-  uint8_t *metadata = NULL;
-  uint32_t metadata_size = self->header_len - self->metadata_offset - 0x20;
-  uint8_t *ptr = NULL;
+  uint8_t *metadata;
+  uint32_t metadata_size;
+  uint8_t *ptr;
   uint32_t i;
+
+  metadata_size = self->header_len - self->metadata_offset - 0x20;
 
   metadata = malloc (metadata_size);
   fseek (in, self->metadata_offset + 0x20, SEEK_SET);
@@ -268,6 +271,7 @@ self_read_metadata (FILE *in, SELF *self, APP_INFO *app_info,
     metadata_header->signature_info_size =
         swap32 (metadata_header->signature_info_size);
   }
+
   ptr += sizeof(METADATA_HEADER);
   if (section_headers) {
     *section_headers = malloc (sizeof(METADATA_SECTION_HEADER) *
@@ -308,20 +312,19 @@ self_load_sections (FILE *in, SELF *self, ELF *elf, ELF_PHDR **phdr,
     METADATA_HEADER *metadata_header, METADATA_SECTION_HEADER **section_headers,
     uint8_t **keys, SELF_SECTION **sections)
 {
-  uint32_t num_sections = 0;
+  uint32_t num_sections;
   uint32_t i;
-
+  uint64_t size;
+  uint32_t elf_size;
+  METADATA_SECTION_HEADER *hdr;
+  uint8_t *temp_data;
+  size = 0;
   num_sections = metadata_header->section_count + 1;
 
   *sections = malloc (sizeof(SELF_SECTION) * num_sections);
   // ELF header
   for (i = 0; i < num_sections; i++) {
-    uint32_t size;
-    METADATA_SECTION_HEADER *hdr;
-
     if (i == 0) {
-      uint32_t elf_size;
-
       hdr = (*section_headers);
       elf_size = elf->header_size + (elf->phent_size * elf->phnum);
       size = hdr->data_offset - self->header_len;
@@ -333,16 +336,14 @@ self_load_sections (FILE *in, SELF *self, ELF *elf, ELF_PHDR **phdr,
 
       fseek (in, self->header_len, SEEK_SET);
       if (fread ((*sections)[0].data, 1, size, in) != size) {
-        ERROR (-6, "Couldn't read section");
+        ERROR (-6, "Couldn't read section header");
       }
 
       fseek (in, self->elf_offset, SEEK_SET);
       if (fread ((*sections)[0].data, 1, size, in) != size) {
-        ERROR (-6, "Couldn't read section");
+        ERROR (-6, "Couldn't read section elf");
       }
     } else {
-      uint8_t *temp_data = NULL;
-
       hdr = (*section_headers) + i - 1;
       if (hdr->type == 2) {
         // phdr
@@ -366,8 +367,9 @@ self_load_sections (FILE *in, SELF *self, ELF *elf, ELF_PHDR **phdr,
         ERROR (-6, "Couldn't read section");
       }
 
+//      if (hdr->encrypted == 3 && self->flags != 0x8000)
       if (hdr->encrypted == 3)
-	aes128ctr(*keys + 0x10 * hdr->key_idx, *keys + 0x10 * hdr->iv_idx,
+		aes128ctr(*keys + 0x10 * hdr->key_idx, *keys + 0x10 * hdr->iv_idx,
             temp_data, hdr->data_size, temp_data);
 
       if (hdr->compressed == 2)
@@ -439,7 +441,7 @@ remove_npdrm(SELF *self, CONTROL_INFO *control_info, uint8_t *metadata, struct k
     struct actdat *actdat;
     u8 enc_const[0x10];
     u8 dec_actdat[0x10];
-    struct key klicensee;
+    u8 klicensee[0x10];
     int i;
     u64 off;
 
@@ -457,15 +459,15 @@ remove_npdrm(SELF *self, CONTROL_INFO *control_info, uint8_t *metadata, struct k
                     if (rif == NULL) {
                         return -1;
                     }
-                    aes128(klist->rif->key, rif->padding, rif->padding);
-                    aes128_enc(klist->idps->key, klist->npdrm_const->key, enc_const);
+                    aes128(klist->rif, rif->padding, rif->padding);
+                    aes128_enc(klist->idps, klist->npdrm_const, enc_const);
                     actdat = actdat_get();
                     if (actdat == NULL) {
                         return -1;
                     }
                     aes128(enc_const, &actdat->keyTable[swap32(rif->actDatIndex)*0x10], dec_actdat);
-                    aes128(dec_actdat, rif->key, klicensee.key);
-                    decrypt_npdrm(metadata, klist, &klicensee);
+                    aes128(dec_actdat, rif->key, klicensee);
+                    decrypt_npdrm(metadata, klist, klicensee);
                     return 1;
                 case 3:
                     decrypt_npdrm(metadata, klist, klist->free_klicensee);
@@ -479,15 +481,16 @@ remove_npdrm(SELF *self, CONTROL_INFO *control_info, uint8_t *metadata, struct k
 }
 
 static void
-decrypt_npdrm(uint8_t *metadata, struct keylist *klist, struct key *klicensee)
+decrypt_npdrm(uint8_t *metadata, struct keylist *klist, u8 *klicensee)
 {
-    struct key d_klic;
+	u8 d_klic[0x10];
+	u8 iv[0x10];
+
+    aes128(klist->klic, klicensee, d_klic);
 
     // iv is 0
-    memset(&d_klic, 0, sizeof(struct key));
-    aes128(klist->klic->key, klicensee->key, d_klic.key);
-
-    aes128cbc(d_klic.key, d_klic.iv, metadata, 0x40, metadata);
+	memset(iv, 0, sizeof iv);
+    aes128cbc(d_klic, iv, metadata, 0x40, metadata);
 }
 
 static int

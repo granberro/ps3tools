@@ -12,11 +12,11 @@
 
 #include <stdio.h>
 
-#ifdef WIN32
-#define MKDIR(x,y) mkdir(x)
-#else
+//#ifdef WIN32
+//#define MKDIR(x,y) mkdir(x)
+//#else
 #define MKDIR(x,y) mkdir(x,y)
-#endif
+//#endif
 
 #ifdef __BIG_ENDIAN__
 #define swap16(x) (x)
@@ -45,6 +45,4 @@
     perror (msg);                               \
     exit (err);                                 \
   } while(0);
-
-
 #endif /* __COMMON_H__ */

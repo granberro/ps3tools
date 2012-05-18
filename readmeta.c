@@ -11,9 +11,6 @@
 #include <string.h>
 #include <stdlib.h>
 
-static FILE *keypair;
-static u8 patch = 0;
-
 int main(int argc, char *argv[])
 {
   FILE *in;
@@ -32,12 +29,9 @@ int main(int argc, char *argv[])
   uint8_t *keys;
   SIGNATURE_INFO signature_info;
   SIGNATURE signature;
-  SELF_SECTION *sections;
-  int num_sections;
-  int i;
 
-  if (argc < 3 || argc > 5) {
-    fprintf(stderr, "usage: %s in.self out.elf [keypair [patch]]\n", argv[0]);
+  if (argc < 3) {
+    fprintf(stderr, "usage: %s in.self out.meta\n", argv[0]);
     return -1;
   }
 
@@ -53,9 +47,6 @@ int main(int argc, char *argv[])
       &metadata_header, &section_headers,  &keys,
       &signature_info, &signature, control_info);
 
-  num_sections = self_load_sections (in, &self, &elf, &phdr,
-      &metadata_header, &section_headers, &keys, &sections);
-
   fclose (in);
 
   out = fopen (argv[2], "wb");
@@ -63,30 +54,13 @@ int main(int argc, char *argv[])
     ERROR (-2, "Can't open output file");
   }
 
-	if (argc > 3) {
-    keypair = fopen(argv[3], "wb");
-		fwrite(&metadata_info, 0x40, 1, keypair);
-		fclose(keypair);		
-  }
+  fwrite(&metadata_info, 1, sizeof(metadata_info), out);
+  fwrite(&metadata_header, 1, sizeof(metadata_header), out);
+  fwrite(&signature_info, 1, sizeof(signature_info), out);
+  fwrite(&signature, 1, sizeof(signature), out);
+  fwrite(&control_info, 1, sizeof(control_info), out);
 
-  if (argc == 5)
-    patch = 1;
-
-  for (i = 0; i < num_sections; i++) {
-    if (sections[i].offset == UINT64_MAX) {
-        continue;
-    }
-    fseek (out, sections[i].offset, SEEK_SET);
-
-	if (patch)
-		patch_sdk(sections[i].size, sections[i].data);
-
-	if (fwrite (sections[i].data, 1, sections[i].size, out) != sections[i].size) {
-      ERROR (-7, "Error writing section");
-    }
-  }
-
-  self_free_sections (&sections, num_sections);
+  fclose(out);
 
   return 0;
 }

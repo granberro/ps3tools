@@ -64,6 +64,9 @@ static struct keylist *self_load_keys(fileinfo* info)
 		case 6:
 			id = KEY_LDR;
 			break;
+		case 8:
+			id = KEY_NPDRM;
+			break;
 		default:
 			fail("invalid type: %08x", info->app_type);	
 	}
@@ -96,6 +99,10 @@ static void read_pkg_header(u8* ptr, fileinfo* info)
 
 static void decrypt(u8* ptr)
 {
+
+	if (sce_remove_npdrm(ptr, klist) < 0)
+	        fail("self_remove_npdrm failed");
+
 	if (keyid < 0)
 		keyid = sce_decrypt_header(ptr, klist);
 	else if (keyid != sce_decrypt_header(ptr, klist))
@@ -234,7 +241,7 @@ int main(int argc, char *argv[])
 
 	int len = strlen(dA);
 	int i;
-	printf("Private Key: ");
+	printf("Private Key rev 0x%02x: ", info1.flags);
 	for (i = len / 2; i < 21; i++)
 		printf("00");
 	printf("%s\n", dA);

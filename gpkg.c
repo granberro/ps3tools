@@ -17,11 +17,69 @@
 #include <assert.h>
 #include <stdlib.h>
 #include <unistd.h>
+#include <dirent.h>
 #include <sys/stat.h>
 
+#define	MAX_FILES	255
 static u8 *pkg = NULL;
+static u8 *destpkg = NULL;
 static PKG_HEADER pkg_header;
+static u32 n_files = 0;
+static struct pkg_file files[MAX_FILES];
 
+static void get_files(const char *d)
+{
+	DIR *dir;
+	struct dirent *de;
+	struct stat st;
+	char path[256];
+	u32 i;
+	u64 offset;
+
+	dir = opendir(d);
+	if (dir == NULL)
+		fail("opendir");
+
+	offset = 0;
+	i = 0;
+	while ((de = readdir(dir))) {
+		if (n_files == MAX_FILES)
+			fail("file overflow. increase MAX_FILES");
+
+		if (strcmp(de->d_name, ".") == 0)
+			continue;
+
+		if (strcmp(de->d_name, "..") == 0)
+			continue;
+		
+		if (strlen(de->d_name) > 0x20)
+			fail("name too long: %s", de->d_name);
+
+//		if (de->d_type != DT_REG)
+//			fail("not a file: %s, %i", de->d_name, de->d_type);
+
+		snprintf(path, sizeof path, "%s/%s", d, de->d_name);
+
+		printf("file:     %s %d\n", de->d_name ,de->d_type);
+
+		memset(&files[i], 0, sizeof(*files));
+		strncpy(files[i].name, de->d_name, 0x19);
+
+		if (stat(path, &st) < 0)
+			fail("cannot stat %s %d", path, stat(path, &st));
+		files[i].size = st.st_size;
+
+		files[i].ptr = mmap_file(path);
+		if (files[i].ptr == NULL)
+			fail("unable to mmap %s", path);
+
+		files[i].offset = offset;
+		offset = round_up(offset + files[i].size, 0x20);
+	
+		i++;
+		n_files++;
+	}
+}
 
 static void parse_header()
 {
@@ -88,71 +146,72 @@ static void decrypt_debug_pkg(void)
 	}
 }
 
-static void unpack_pkg(void)
+static void get_files_pkg(const char *d)
 {
 	u32 i;
-	u32 fname_len;
-	u32 fname_off;
-	u64 file_offset;
-	u32 flags;
-	char fname[256];
+	u64 running_offset;
 	u8 *tmp;
-	u64 file_size;
+	u64 total_size;
+	char path[256];
+	struct stat st;
+	u32 flags;
+
+	total_size = 0;
+	tmp = pkg + pkg_header.offset;
+	running_offset = be64(tmp + 0x08) + pkg_header.offset;
 
 	for (i = 0; i < pkg_header.file_count; i++) {
 		tmp = pkg + pkg_header.offset + i*0x20;
 
-		fname_off = be32(tmp) + pkg_header.offset;
-		fname_len = be32(tmp + 0x04);
-		file_offset = be64(tmp + 0x08) + pkg_header.offset;
-		file_size = be64(tmp + 0x10);
+		files[i].name_offset = be32(tmp) + pkg_header.offset;
+		files[i].name_len = be32(tmp + 0x04);
+		files[i].offset = running_offset;
+		files[i].flags = be32(tmp + 0x18);
+		memset(files[i].name, 0, sizeof files[i].name);
+		strncpy(files[i].name, (char *)(pkg + files[i].name_offset), files[i].name_len);
+
+		//snprintf(path, sizeof path, "%s/%s", d, files[i].name);
+		
+		//stat(path, &st);
+		//files[i].size = st.st_size;
+		//running_offset+= files[i].size;
+		//total_size+= files[i].size;
+		//files[i].ptr = mmap_file(path);
+		//if (files[i].ptr == NULL)
+		//	fail("unable to mmap %s", path);
+
+		printf("  Id:         %d\n", i);
+		printf("  header:     %s\n", files[i].name);
+		printf("  size:       %08x_%08x bytes\n", (u32)(files[i].size>>32), (u32)files[i].size);
+
+		//file_size = be64(tmp + 0x10);
 		flags = be32(tmp + 0x18);
-
-		if (fname_len >= sizeof fname)
-			fail("filename too long: %s", pkg + fname_off);
-
-		memset(fname, 0, sizeof fname);
-		strncpy(fname, (char *)(pkg + fname_off), fname_len);
-
 		flags &= 0xff;
 
-		printf("File Type:    %04x - %s\n", flags, id2name(flags, t_file_type, "unknown"));
-		printf("  Name:         %s\n", fname);
-		printf("  size:       %08x_%08x bytes\n", (u32)(file_size>>32), (u32)file_size);
+		printf("File Type:    %04x \n", flags);
+		//printf("  Name:         %s\n", fname);
+		//printf("  size:       %08x_%08x bytes\n", (u32)(file_size>>32), (u32)file_size);
 
-		if (flags == 4)
+/*		if (flags == 4)
 			mkdir(fname, 0777);
 		else if (flags == 1 || flags == 3 || flags == 9 || flags == 2)
 			memcpy_to_file(fname, pkg + file_offset, file_size);
 		else
-			fail("unknown flags: %08x", flags);
+			fail("unknown flags: %08x", flags);*/
 	}
 }
 
 int main(int argc, char *argv[])
 {
-	char *dir;
-	FILE *decrypted;
+	u32 i;
 
-	if (argc != 2 && argc != 3 && argc != 4)
-		fail("usage: ungpkg filename.pkg [target] [decryted]");
+	if (argc != 3 && argc != 4)
+		fail("usage: gpkg contents filename.pkg [original.pkg]");
 
-	pkg = mmap_file(argv[1]);
+	if (argc == 4) 
+		destpkg = mmap_file(argv[3]);
 
-	if (argc == 2) {
-		dir = malloc(0x31);
-		memset(dir, 0, 0x31);
-		memset(dir, 0, 0x30);
-		memcpy(dir, pkg + 0x30, 0x30);
-	} else {
-		dir = argv[2];
-	}
-
-	mkdir(dir, 0777);
-
-	if (chdir(dir) != 0)
-		fail("chdir(%s)", dir);
-
+	pkg = mmap_file(argv[2]);
 	parse_header();
 
 	if (pkg_header.type & PKG_RETAIL)
@@ -162,17 +221,17 @@ int main(int argc, char *argv[])
 			decrypt_debug_pkg();
 	else 
 		fail("invalid pkg type: %x", pkg_header.type);
+	
+/*	get_files_pkg(argv[1]);
 
-	if (argc == 4) {
-		decrypted = fopen (argv[3], "wb");
-  		if (decrypted == NULL)
-    		fail ("Can't open output file");
-
-		fwrite(pkg + pkg_header.offset, pkg_header.size, 1, decrypted);
-		fclose(decrypted);	
+	for (i=0; i<n_files;i++) {
+		printf("  Id:         %d\n", i);
+		printf("  header:     %s\n", files[i].name);
+		printf("  size:       %08x_%08x bytes\n", (u32)(files[i].size>>32), (u32)files[i].size);
 	}
 
-	unpack_pkg();
-
+       foo = fopen(argv[3], "wb");
+		fwrite(pkg + pkg_header.offset, pkg_header.size, 1, foo);
+*/
 	return 0;
 }

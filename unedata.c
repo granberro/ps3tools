@@ -1,4 +1,3 @@
-// Copyright 2010       Sven Peter <svenpeter@gmail.com>
 // Licensed under the terms of the GNU GPL, version 2
 // http://www.gnu.org/licenses/old-licenses/gpl-2.0.txt
 
@@ -14,9 +13,8 @@
 
 static u8 *self = NULL;
 static u8 *elf = NULL;
+static u8 *in = NULL;
 static FILE *out = NULL;
-static FILE *keypair = NULL;
-static u8 patch = 0;
 
 static u64 info_offset;
 static u32 key_ver;
@@ -65,7 +63,6 @@ static void read_header(void)
 }
 
 struct self_sec {
-	
 	u32 idx;
 	u64 offset;
 	u64 size;
@@ -114,32 +111,19 @@ static void read_sections(void)
 	memset(s, 0, sizeof s);
 	for (i = 0, j = 0; i < ehdr.e_phnum; i++) {
 		read_section(i, &s[j]);
-		if (s[j].size) {
-			elf_read_phdr(arch64, elf + phdr_offset + (ehdr.e_phentsize * s[j].idx), &p);
-			if (p.p_type == 0x700000A4 || p.p_type == 1)
-				j++;
-		}
+		if (s[j].compressed)
+			j++;
 	}
 
 	n_secs = j;
 	qsort(s, n_secs, sizeof(*s), qsort_compare);
 
-	for (i = 0; i < j; i++) {
-		printf("Sec %d idx %d elf_offset 0x%08x elf_size 0x%08x\n", i, s[i].idx , (u32)s[i].offset, (u32)s[i].size);
-	}
-
-
 	elf_offset = 0;
 	self_offset = header_len;
 	j = 0;
 	i = 0;
-
-
-
 	while (elf_offset < filesize) {
-
 		if (i == n_secs) {
-printf("Last Sec %d elf_offset 0x%08x self_offset 0x%08x filesize 0x%08x\n", j, (u32)elf_offset, (u32)self_offset, (u32)filesize);
 			self_sections[j].offset = self_offset;
 			self_sections[j].size = filesize - elf_offset;
 			self_sections[j].compressed = 0;
@@ -147,22 +131,20 @@ printf("Last Sec %d elf_offset 0x%08x self_offset 0x%08x filesize 0x%08x\n", j, 
 			self_sections[j].elf_offset = elf_offset;
 			elf_offset = filesize;
 		} else if (self_offset == s[i].offset) {
-			elf_read_phdr(arch64, elf + phdr_offset +
-					(ehdr.e_phentsize * s[i].idx), &p);
-printf("Sec %d elf_offset 0x%08x self_offset 0x%08x size 0x%08x\n", j, (u32)elf_offset, (u32)self_offset, (u32)p.p_filesz);
 			self_sections[j].offset = self_offset;
 			self_sections[j].size = s[i].size;
-			self_sections[j].compressed = s[i].compressed;
+			self_sections[j].compressed = 1;
+			elf_read_phdr(arch64, elf + phdr_offset +
+					(ehdr.e_phentsize * s[i].idx), &p);
 			self_sections[j].size_uncompressed = p.p_filesz;
 			self_sections[j].elf_offset = p.p_off;
-			elf_offset = p.p_off + self_sections[j].size_uncompressed;
+
+			elf_offset = p.p_off + p.p_filesz;
 			self_offset = s[i].next;
 			i++;
 		} else {
 			elf_read_phdr(arch64, elf + phdr_offset +
 					(ehdr.e_phentsize * s[i].idx), &p);
-printf("No sec %d elf_offset 0x%08x self_offset 0x%08x size 0x%08x\n", j, (u32)elf_offset, (u32)self_offset, (u32)(p.p_off - elf_offset));
-
 			self_sections[j].offset = self_offset;
 			self_sections[j].size = p.p_off - elf_offset;
 			self_sections[j].compressed = 0;
@@ -178,68 +160,225 @@ printf("No sec %d elf_offset 0x%08x self_offset 0x%08x size 0x%08x\n", j, (u32)e
 	n_sections = j;
 }
 
+int decrypt_data()
+{
+	u64 edata_len;
+	u64 meta_offset;
+
+	u32 meta_len;
+	u32 meta_n_hdr;
+	u64 header_len;
+	u32 i;
+
+	u64 offset;
+	u64 size;
+	u32 keyid;
+	u32 ivid;
+	u8 *tmp;
+
+	u8 iv[0x10];
+	u8 key[0x10];
+
+	edata_len = be64(in + 0x88);
+
+	meta_offset = be32(self + 0x0c);
+	header_len  = be64(self + 0x10);
+	meta_len = header_len - meta_offset;
+	meta_n_hdr = be32(self + meta_offset + 0x60 + 0xc);
+
+	for (i = 0; i < 0x01; i = i + 0x10) {
+		tmp = in + 0x90 + 0x10*i;
+
+		memcpy(key, self + meta_offset + 0x20 , 0x10);
+		memcpy(iv, self + meta_offset + 0x40 , 0x10);
+		aes128ctr(key,
+		          iv,
+ 		          in + 0xb0,
+			  0x80,
+			  in + 0xb0);
+	}
+
+	print_hash(key, 0x10);
+	printf("\n");
+	print_hash(iv, 0x10);
+	printf("\n");
+	printf("\n");
+
+	print_hash(in + 0x90, 0x10);
+	printf("\n");
+	print_hash(in + 0x90 + 0x10, 0x10);
+	printf("\n");
+	print_hash(in + 0x90 + 0x20, 0x10);
+	printf("\n");
+	print_hash(in + 0x90 + 0x30, 0x10);
+	printf("\n");
+	print_hash(in + 0x90 + 0x40, 0x10);
+	printf("\n");
+	print_hash(in + 0x90 + 0x50, 0x10);
+	printf("\n");
+	print_hash(in + 0x90 + 0x60, 0x10);
+	printf("\n");
+
+
+	return 0;
+}
+
+void decrypt_npdrm(u8 *ptr, struct keylist *klist, u8 *klicensee)
+{
+	u32 meta_offset;
+	u8 d_klic[0x10];
+	u8 iv[0x10];
+
+	meta_offset = 0x70;
+
+	aes128(klist->klic, klicensee, d_klic);
+
+	print_hash(ptr + meta_offset + 0x20, 0x10);
+	printf("\n");
+	print_hash(ptr + meta_offset + 0x30, 0x10);
+	printf("\n");
+	print_hash(ptr + meta_offset + 0x40, 0x10);
+	printf("\n");
+	print_hash(ptr + meta_offset + 0x50, 0x10);
+	printf("\n");
+
+	// iv is 0	
+	memset(iv, 0, sizeof iv);
+	aes128cbc(d_klic, iv, ptr + meta_offset + 0x20, 0x40, ptr + meta_offset + 0x20);
+
+	memcpy(iv, ptr + meta_offset + 0x40, 0x10);
+	aes128ctr(ptr + meta_offset + 0x20,
+		  iv,
+		  ptr + meta_offset + 0x60,
+		  0x80,
+		  ptr + meta_offset + 0x60);
+
+
+	print_hash(ptr + meta_offset + 0x20, 0x10);
+	printf("\n");
+	print_hash(ptr + meta_offset + 0x30, 0x10);
+	printf("\n");
+	print_hash(ptr + meta_offset + 0x40, 0x10);
+	printf("\n");
+	print_hash(ptr + meta_offset + 0x50, 0x10);
+	printf("\n"); 
+}
+
+int decrypt_header(u8 *ptr, struct keylist *klist)
+{
+	u32 meta_offset;
+	u32 meta_len;
+	u32 i, j;
+	u8 tmp[0x40];
+	int success = 0;
+
+
+	meta_offset = 0x90;
+
+	for (i = 0; i < klist->n; i++) {
+		aes256cbc(klist->keys[i].key,
+			  klist->keys[i].iv,
+			  ptr + meta_offset + 0x60,
+			  0x40,
+			  tmp); 
+
+		success = 1;
+		for (j = 0x10; j < (0x10 + 0x10); j++)
+			if (tmp[j] != 0)
+				success = 0;
+	
+		for (j = 0x30; j < (0x30 + 0x10); j++)
+			if (tmp[j] != 0)
+			       success = 0;
+
+		if (success == 1) {
+			memcpy(ptr + meta_offset + 0x20, tmp, 0x40);
+			break;
+		}
+	}
+
+	if (success != 1)
+		return -1;
+
+	memcpy(tmp, ptr + meta_offset + 0x40, 0x10);
+	aes128ctr(ptr + meta_offset + 0x20,
+		  tmp,
+		  ptr + meta_offset + 0x60,
+		  0x20,
+		  ptr + meta_offset + 0x60);
+
+	meta_len = 0x80;
+
+	aes128ctr(ptr + meta_offset + 0x20,
+		  tmp,
+		  ptr + meta_offset + 0x80,
+		  meta_len - 0x80,
+		  ptr + meta_offset + 0x80);
+
+	return i;
+}
+
+
 static void write_elf(void)
 {
 	u32 i;
-	u32 meta_n_hdr;
 	u8 *bfr;
-
-	if (key_ver != 0x8000)
-		meta_n_hdr = be32(self + meta_offset + 0x60 + 0xc);
-	else
-		meta_n_hdr = ehdr.e_phnum;
-
-	// Write header + phdr if not are repeated TODO revisar
-	if (ehdr.e_phnum ==  meta_n_hdr) {
-		fwrite(elf, ehdr.e_ehsize, 1, out);
-		fwrite(elf + phdr_offset, ehdr.e_phentsize * ehdr.e_phnum, 1, out);
-printf("OOPS size 0x%08x\n", (u32)(ehdr.e_ehsize + ehdr.e_phentsize * ehdr.e_phnum));
-	}
+	u32 size;
+	u32 offset = 0;
 
 	for (i = 0; i < n_sections; i++) {
-	
-		fseek (out, self_sections[i].elf_offset, SEEK_SET);
-
-		// Compressed
+		fseek(out, self_sections[i].elf_offset, SEEK_SET);
+		offset = self_sections[i].elf_offset;
 		if (self_sections[i].compressed) {
-			if (self_sections[i].size_uncompressed) {
-				bfr = malloc(self_sections[i].size_uncompressed);
-				decompress(self + self_sections[i].offset,
-					   self_sections[i].size,
-					   bfr, self_sections[i].size_uncompressed);
+			size = self_sections[i].size_uncompressed;
 
-				if (patch)
-					patch_sdk(self_sections[i].size_uncompressed, bfr);
-			
-				fwrite(bfr, self_sections[i].size_uncompressed, 1, out);
-			  
-				free(bfr);
-			}
-		}
-		else {
-			if (self_sections[i].size) {
-				bfr = self + self_sections[i].offset;
+			bfr = malloc(size);
+			if (bfr == NULL)
+				fail("failed to allocate %d bytes", size);
 
-				if (patch)
-					patch_sdk(self_sections[i].size, bfr);
+			offset += size;
 	
-				fwrite(bfr, self_sections[i].size, 1, out);
-			}
+			printf("compressed self_sections[i].offset 0x%x self_sections[i].size 0x%x\n",
+				self_sections[i].offset,self_sections[i].size);
+
+
+			decompress(self + self_sections[i].offset,
+			           self_sections[i].size,
+				   bfr, size);
+			fwrite(bfr, size, 1, out);
+			free(bfr);
+		} else {
+			bfr = self + self_sections[i].offset;
+			size = self_sections[i].size;
+			offset += size;
+	
+			fwrite(bfr, size, 1, out);
 		}
-printf("section %d offset 0x%08x size 0x%08x real 0x%08x file offset 0x%08x\n", i, (u32)self_sections[i].offset, (u32)self_sections[i].size,
- (u32)self_sections[i].size_uncompressed, (u32)self_sections[i].elf_offset);
-
 	}
-// Shdr section
-printf("shdr    %d offset 0x%08x size 0x%08x real 0x%08x file offset 0x%08x\n", i, (u32)(shdr_offset + elf_offset), (u32)(filesize - ehdr.e_shoff),
- (u32)(filesize - ehdr.e_shoff), (u32)ehdr.e_shoff);
-bfr = self + shdr_offset + elf_offset;
-fseek (out, ehdr.e_shoff, SEEK_SET);
-fwrite(bfr, filesize - ehdr.e_shoff, 1, out);
+}
 
-close(out);
-return;
+static void remove_shnames(u64 shdr_offset, u16 n_shdr, u64 shstrtab_offset, u32 strtab_size)
+{
+	u16 i;
+	u32 size;
+	struct elf_shdr s;
 
+	if (arch64)
+		size = 0x40;
+	else
+		size = 0x28;
+
+	for (i = 0; i < n_shdr; i++) {
+		elf_read_shdr(arch64, elf + shdr_offset + i * size, &s);
+
+		s.sh_name = 0;
+		if (s.sh_type == 3) {
+			s.sh_offset = shstrtab_offset;
+			s.sh_size = strtab_size;
+		}
+
+		elf_write_shdr(arch64, elf + shdr_offset + i * size, &s);
+	}
 }
 
 static void check_elf(void)
@@ -262,8 +401,6 @@ static void check_elf(void)
 	if (memcmp(bfr, elf_magic, sizeof elf_magic) == 0)
 		return;
 
-	printf("Rebuilding ELF header\n");
-
 	elf_offset =  be64(self + 0x30);
 	phdr_offset = be64(self + 0x38) - elf_offset;
 	shdr_offset = be64(self + 0x40) - elf_offset;
@@ -279,7 +416,7 @@ static void check_elf(void)
 		n_shdr = be16(elf + 0x3c);
 		shstrtab_offset = shdr_offset_new + n_shdr * 0x40;
 
-		//remove_shnames(shdr_offset, n_shdr, shstrtab_offset, sizeof shstrtab);
+		remove_shnames(shdr_offset, n_shdr, shstrtab_offset, sizeof shstrtab);
 
 		fseek(out, phdr_offset_new, SEEK_SET);
 		fwrite(elf + phdr_offset, 0x38, n_phdr, out);
@@ -305,7 +442,7 @@ static void check_elf(void)
 		n_shdr = be16(elf + 0x30);
 		shstrtab_offset = shdr_offset_new + n_shdr * 0x40;
 
-		//remove_shnames(shdr_offset, n_shdr, shstrtab_offset, sizeof shstrtab);
+		remove_shnames(shdr_offset, n_shdr, shstrtab_offset, sizeof shstrtab);
 	
 		fseek(out, phdr_offset_new, SEEK_SET);
 		fwrite(elf + phdr_offset, 0x20, n_phdr, out);
@@ -360,6 +497,7 @@ static struct keylist *self_load_keys(void)
 static void self_decrypt(void)
 {
 	struct keylist *klist;
+	int i;
 
 	klist = self_load_keys();
 	if (klist == NULL)
@@ -368,47 +506,56 @@ static void self_decrypt(void)
 	if (sce_remove_npdrm(self, klist) < 0)
 	        fail("self_remove_npdrm failed");
 
-	if (sce_decrypt_header(self, klist) < 0)
-		fail("self_decrypt_header failed");
+	sce_decrypt_header(self, klist);
 
-	if (sce_decrypt_data(self) < 0)
-		fail("self_decrypt_data failed");
+	decrypt_npdrm(in, klist, klist->free_klicensee);
+	i = decrypt_header(in, klist);
+
+	printf ("Dec %d\n",i);
+
+	print_hash(in + 0x80, 0x10);
+	printf("\n");
+	print_hash(in + 0x90, 0x10);
+	printf("\n");
+	print_hash(in + 0x90 + 0x10, 0x10);
+	printf("\n");
+	print_hash(in + 0x90 + 0x20, 0x10);
+	printf("\n");
+	print_hash(in + 0x90 + 0x30, 0x10);
+	printf("\n");
+	print_hash(in + 0x90 + 0x40, 0x10);
+	printf("\n");
+	print_hash(in + 0x90 + 0x50, 0x10);
+	printf("\n");
+	print_hash(in + 0x90 + 0x60, 0x10);
+	printf("\n");
 }
 
 int main(int argc, char *argv[])
 {
-	if (argc < 3 || argc > 5)
-		fail("usage: unself in.self out.elf [keypair [patch]]");
+	if (argc != 4)
+		fail("usage: unedata in.edat file.self out.edat");
 
-	self = mmap_file(argv[1]);
+	in = mmap_file(argv[1]);
+	self = mmap_file(argv[2]);
 
 	if (be32(self) != 0x53434500)
 		fail("not a SELF");
 
 	read_header();
-	read_sections();
+
+	if (app_type != 0x08)
+		fail("not a NPDRN self");
 
 	if (key_ver != 0x8000)
 		self_decrypt();
 
-	out = fopen(argv[2], "wb");
-	fclose(out);
-
-	out = fopen(argv[2], "rb+");
-
-	if (argc > 3) {
-		keypair = fopen(argv[3], "wb");
-		fwrite(self + meta_offset + 0x20, 0x40, 1, keypair);
-		fclose(keypair);		
-	}
-
-	if (argc == 5)
-		patch = 1;
+/*	out = fopen(argv[3], "w+");	
 
 	write_elf();
 	check_elf();
 
 	fclose(out);
-
+*/
 	return 0;
 }

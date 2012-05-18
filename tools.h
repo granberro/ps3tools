@@ -22,7 +22,9 @@ enum sce_key {
 };
 
 void print_hash(u8 *ptr, u32 len);
+u8 patch_sdk(u32 size, u8 *ptr);
 void *mmap_file(const char *path);
+u64 get_filesize(const char *fname);
 void memcpy_to_file(const char *fname, u8 *ptr, u64 size);
 const char *id2name(u32 id, struct id2name_tbl *t, const char *unk);
 void fail(const char *fmt, ...) __attribute__((noreturn));
@@ -37,7 +39,7 @@ void elf_write_shdr(int arch64, u8 *shdr, struct elf_shdr *s);
 void aes256cbc(u8 *key, u8 *iv, u8 *in, u64 len, u8 *out);
 void aes256cbc_enc(u8 *key, u8 *iv, u8 *in, u64 len, u8 *out);
 void aes128ctr(u8 *key, u8 *iv, u8 *in, u64 len, u8 *out);
-void aes128cbc(u8 *key, u8 *iv_in, u8 *in, u64 len, u8 *out);
+void aes128cbc(u8 *key, u8 *iv, u8 *in, u64 len, u8 *out);
 void aes128cbc_enc(u8 *key, u8 *iv, u8 *in, u64 len, u8 *out);
 void aes128(u8 *key, const u8 *in, u8 *out);
 void aes128_enc(u8 *key, const u8 *in, u8 *out);
@@ -53,7 +55,8 @@ struct rif *rif_get(const char *content_id);
 struct actdat *actdat_get(void);
 
 int sce_remove_npdrm(u8 *ptr, struct keylist *klist);
-void sce_decrypt_npdrm(u8 *ptr, struct keylist *klist, struct key *klicensee);
+void sce_decrypt_npdrm(u8 *ptr, struct keylist *klist, u8 *klicensee);
+void sce_encrypt_npdrm(u8 *ptr, struct keylist *klist, u8 *klicensee);
 
 int sce_decrypt_header(u8 *ptr, struct keylist *klist);
 int sce_encrypt_header(u8 *ptr, struct key *k);
@@ -66,6 +69,9 @@ void ecdsa_set_pub(u8 *Q);
 void ecdsa_set_priv(u8 *k);
 int ecdsa_verify(u8 *hash, u8 *R, u8 *S);
 void ecdsa_sign(u8 *hash, u8 *R, u8 *S);
+
+void rol1(u8* worthless);
+void aesOmac1Mode(u8* output, u8* input, int len, u8* aes_key_data, int aes_key_bits);
 
 void bn_copy(u8 *d, u8 *a, u32 n);
 int bn_compare(u8 *a, u8 *b, u32 n);
